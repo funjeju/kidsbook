@@ -1,4 +1,4 @@
-import React, { useState, useCallback, ChangeEvent } from 'react';
+import React, { useState, useCallback, ChangeEvent, useEffect } from 'react';
 import { Character, StoryPageData, ArtStylePreset } from './types';
 import { generateIllustration, analyzeImageStyle } from './services/geminiService';
 import { Card } from './components/Card';
@@ -63,6 +63,12 @@ const CheckCircleIcon: React.FC<{className?: string}> = ({className}) => (
       <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12Zm13.36-1.814a.75.75 0 1 0-1.06-1.06L10.94 12.44l-1.72-1.72a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.06 0l3.75-3.75Z" clipRule="evenodd" />
     </svg>
 );
+const EyeIcon: React.FC<{className?: string}> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+    </svg>
+);
 
 
 // --- SUB-COMPONENTS ---
@@ -74,6 +80,28 @@ const Header: React.FC = () => (
     </header>
 );
 
+const PresetDetailModal: React.FC<{ preset: ArtStylePreset | null, onClose: () => void }> = ({ preset, onClose }) => {
+    if (!preset) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
+            <div className="bg-white rounded-lg shadow-2xl p-6 m-4 max-w-md w-full" onClick={e => e.stopPropagation()}>
+                <h3 className="text-2xl font-bold text-charcoal mb-4">{preset.name}</h3>
+                <img src={preset.imageUrl} alt={preset.name} className="w-full h-48 object-cover rounded-md mb-4" />
+                <h4 className="font-semibold text-teal-dark mb-2">추출된 아트 스타일 설명:</h4>
+                <p className="text-sm text-gray-700 bg-cream p-3 rounded-md whitespace-pre-wrap">{preset.description}</p>
+                <button
+                    onClick={onClose}
+                    className="mt-6 w-full bg-charcoal text-white font-bold py-2 px-4 rounded-md hover:bg-opacity-80 transition"
+                >
+                    닫기
+                </button>
+            </div>
+        </div>
+    );
+};
+
+
 const App: React.FC = () => {
     const [presets, setPresets] = useState<ArtStylePreset[]>([]);
     const [selectedPresetIds, setSelectedPresetIds] = useState<Set<string>>(new Set());
@@ -82,6 +110,7 @@ const App: React.FC = () => {
     const [newPresetName, setNewPresetName] = useState('');
     const [newPresetFile, setNewPresetFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [viewingPreset, setViewingPreset] = useState<ArtStylePreset | null>(null);
 
     const [characters, setCharacters] = useState<Character[]>([
         {id: '1', name: '사자 레오', description: '작고 친근한 아기 사자. 솜털 같고 연한 갈색 갈기를 가졌으며, 호기심 많은 파란 눈과 작은 빨간 스카프를 하고 있다.'},
@@ -93,10 +122,24 @@ const App: React.FC = () => {
     const [newCharName, setNewCharName] = useState('');
     const [newCharDesc, setNewCharDesc] = useState('');
 
+    useEffect(() => {
+        try {
+            const cachedPresets = localStorage.getItem('artStylePresets');
+            if (cachedPresets) {
+                setPresets(JSON.parse(cachedPresets));
+            }
+        } catch (error) {
+            console.error("Failed to load presets from localStorage", error);
+        }
+    }, []);
+
     const handleImageFileChange = (e: ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
             setNewPresetFile(file);
+            if (previewUrl) {
+                URL.revokeObjectURL(previewUrl); 
+            }
             setPreviewUrl(URL.createObjectURL(file));
         }
     };
@@ -109,18 +152,34 @@ const App: React.FC = () => {
         try {
             const { base64, mimeType } = await fileToBase64(newPresetFile);
             const description = await analyzeImageStyle(base64, mimeType);
-            const newPreset: ArtStylePreset = {
-                id: crypto.randomUUID(),
-                name: newPresetName.trim(),
-                imageUrl: URL.createObjectURL(newPresetFile), // Use blob URL for display
-                description
+            
+            // For localStorage, we need to store the image as a data URL, not a blob URL
+            const reader = new FileReader();
+            reader.readAsDataURL(newPresetFile);
+            reader.onloadend = () => {
+                const newPreset: ArtStylePreset = {
+                    id: crypto.randomUUID(),
+                    name: newPresetName.trim(),
+                    imageUrl: reader.result as string, 
+                    description
+                };
+    
+                setPresets(prev => {
+                    const updatedPresets = [...prev, newPreset];
+                    try {
+                        localStorage.setItem('artStylePresets', JSON.stringify(updatedPresets));
+                    } catch (error) {
+                        console.error("Failed to save presets to localStorage", error);
+                    }
+                    return updatedPresets;
+                });
+    
+                // Reset form
+                setNewPresetName('');
+                setNewPresetFile(null);
+                setPreviewUrl(null);
             };
-            setPresets(prev => [...prev, newPreset]);
 
-            // Reset form
-            setNewPresetName('');
-            setNewPresetFile(null);
-            setPreviewUrl(null);
 
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
@@ -202,6 +261,23 @@ const App: React.FC = () => {
             setPages(currentPages => currentPages.map(p => p.id === pageId ? { ...p, isLoading: false, error: errorMessage } : p));
         }
     }, [characters, pages, presets, selectedPresetIds]);
+    
+    const handleRemovePreset = (idToRemove: string) => {
+        setPresets(prev => {
+            const updatedPresets = prev.filter(p => p.id !== idToRemove);
+            try {
+                localStorage.setItem('artStylePresets', JSON.stringify(updatedPresets));
+            } catch (error) {
+                console.error("Failed to update presets in localStorage", error);
+            }
+            return updatedPresets;
+        });
+        setSelectedPresetIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(idToRemove);
+            return newSet;
+        });
+    };
 
     return (
         <div className="container mx-auto p-4 md:p-8">
@@ -215,15 +291,19 @@ const App: React.FC = () => {
                         {/* Preset List */}
                         <div className="grid grid-cols-2 gap-3 mb-4">
                             {presets.map(preset => (
-                                <div key={preset.id} onClick={() => handleTogglePreset(preset.id)} className="cursor-pointer relative rounded-lg overflow-hidden border-2 transition-all duration-200"
+                                <div key={preset.id} className="group relative rounded-lg overflow-hidden border-2 transition-all duration-200"
                                     style={{borderColor: selectedPresetIds.has(preset.id) ? 'var(--color-teal-dark)' : 'transparent'}}
                                 >
-                                    <img src={preset.imageUrl} alt={preset.name} className="w-full h-24 object-cover" />
-                                    <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 p-1">
-                                        <p className="text-white text-xs text-center truncate">{preset.name}</p>
+                                    <img src={preset.imageUrl} alt={preset.name} className="w-full h-24 object-cover cursor-pointer" onClick={() => handleTogglePreset(preset.id)} />
+                                    <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 p-1 flex justify-between items-center">
+                                        <p className="text-white text-xs text-left truncate flex-grow pl-1">{preset.name}</p>
+                                        <div className="flex">
+                                            <button onClick={() => setViewingPreset(preset)} className="p-1 text-white hover:text-teal-light transition"><EyeIcon className="w-4 h-4"/></button>
+                                            <button onClick={() => handleRemovePreset(preset.id)} className="p-1 text-white hover:text-coral transition"><TrashIcon className="w-4 h-4"/></button>
+                                        </div>
                                     </div>
                                     {selectedPresetIds.has(preset.id) && (
-                                        <div className="absolute top-1 right-1 bg-teal-dark rounded-full">
+                                        <div className="absolute top-1 right-1 bg-teal-dark rounded-full cursor-pointer" onClick={() => handleTogglePreset(preset.id)}>
                                             <CheckCircleIcon className="w-5 h-5 text-white"/>
                                         </div>
                                     )}
@@ -326,6 +406,7 @@ const App: React.FC = () => {
                      </Card>
                 </div>
             </main>
+            <PresetDetailModal preset={viewingPreset} onClose={() => setViewingPreset(null)} />
         </div>
     );
 };
