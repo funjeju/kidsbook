@@ -1,0 +1,5 @@
+{
+  "name": "AI Fairy Tale Illustrator",
+  "description": "AI를 사용하여 일관된 아트 스타일과 캐릭터로 삽화가 포함된 동화책을 만드는 애플리케이션입니다. 아트 스타일을 정의하고, 캐릭터를 만들고, 이야기를 작성하고, 각 페이지에 대한 아름다운 삽화를 생성하세요.",
+  "requestFramePermissions": []
+}
